@@ -7,6 +7,7 @@
 
 import logging
 import math
+from typing import Optional
 
 import numpy as np
 import torch
@@ -74,6 +75,8 @@ class ParallelWaveGANGenerator(torch.nn.Module):
         self.stacks = stacks
         self.kernel_size = kernel_size
 
+        self.pad_context = torch.nn.ReplicationPad1d(self.aux_context_window)
+
         # check the number of layers and stacks
         assert layers % stacks == 0
         layers_per_stack = layers // stacks
@@ -106,7 +109,7 @@ class ParallelWaveGANGenerator(torch.nn.Module):
                         }
                     )
                 self.upsample_net = getattr(upsample, upsample_net)(**upsample_params)
-            self.upsample_factor = np.prod(upsample_params["upsample_scales"])
+            self.upsample_factor: int = math.prod(upsample_params["upsample_scales"])
         else:
             self.upsample_net = None
             self.upsample_factor = 1
@@ -142,7 +145,7 @@ class ParallelWaveGANGenerator(torch.nn.Module):
         if use_weight_norm:
             self.apply_weight_norm()
 
-    def forward(self, x, c):
+    def forward(self, x: torch.Tensor, c: Optional[torch.Tensor] = None):
         """Calculate forward propagation.
 
         Args:
@@ -156,7 +159,7 @@ class ParallelWaveGANGenerator(torch.nn.Module):
         # perform upsampling
         if c is not None and self.upsample_net is not None:
             c = self.upsample_net(c)
-            assert c.size(-1) == x.size(-1)
+            # assert c.size(-1) == x.size(-1)
 
         # encode to hidden representation
         x = self.first_conv(x)
@@ -195,13 +198,10 @@ class ParallelWaveGANGenerator(torch.nn.Module):
 
         self.apply(_apply_weight_norm)
 
-    @staticmethod
-    def _get_receptive_field_size(
-        layers, stacks, kernel_size, dilation=lambda x: 2 ** x
-    ):
-        assert layers % stacks == 0
+    def _get_receptive_field_size(self, layers: int, stacks: int, kernel_size: int):
+        # assert layers % stacks == 0
         layers_per_cycle = layers // stacks
-        dilations = [dilation(i % layers_per_cycle) for i in range(layers)]
+        dilations = [2 ** (i % layers_per_cycle) for i in range(layers)]
         return (kernel_size - 1) * sum(dilations) + 1
 
     @property
@@ -229,7 +229,18 @@ class ParallelWaveGANGenerator(torch.nn.Module):
         self.register_buffer("scale", torch.from_numpy(scale).float())
         logging.info("Successfully registered stats as buffer.")
 
-    def inference(self, c=None, x=None, normalize_before=False):
+    @torch.jit.export
+    def simple_inference(self, c: torch.Tensor) -> torch.Tensor:
+        x = torch.randn(1, 1, c.shape[0] * self.upsample_factor)
+
+        # if normalize_before:
+        #     c = (c - self.mean) / self.scale
+
+        c = c.transpose(1, 0).unsqueeze(0)
+        c = self.pad_context(c)
+        return self.forward(x, c).squeeze(0).transpose(1, 0)
+
+    def inference(self, c: torch.Tensor, x: Optional[torch.Tensor] = None, normalize_before=False) -> torch.Tensor:
         """Perform inference.
 
         Args:

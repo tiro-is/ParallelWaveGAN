@@ -6,6 +6,8 @@ This code is modified from https://github.com/r9y9/wavenet_vocoder.
 
 """
 
+from typing import List
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -15,6 +17,9 @@ from parallel_wavegan.layers import Conv1d
 
 class Stretch2d(torch.nn.Module):
     """Stretch2d module."""
+
+    x_scale: float
+    y_scale: float
 
     def __init__(self, x_scale, y_scale, mode="nearest"):
         """Initialize Stretch2d module.
@@ -40,8 +45,9 @@ class Stretch2d(torch.nn.Module):
             Tensor: Interpolated tensor (B, C, F * y_scale, T * x_scale),
 
         """
+        scale_factor: List[float] = [self.y_scale, self.x_scale]
         return F.interpolate(
-            x, scale_factor=(self.y_scale, self.x_scale), mode=self.mode
+            x, scale_factor=scale_factor, mode=self.mode
         )
 
 
@@ -83,6 +89,8 @@ class UpsampleNetwork(torch.nn.Module):
         """
         super(UpsampleNetwork, self).__init__()
         self.use_causal_conv = use_causal_conv
+        if self.use_causal_conv:
+            raise NotImplementedError("Support for using causal conv has been removed!")
         self.up_layers = torch.nn.ModuleList()
         for scale in upsample_scales:
             # interpolation layer
@@ -120,11 +128,15 @@ class UpsampleNetwork(torch.nn.Module):
 
         """
         c = c.unsqueeze(1)  # (B, 1, C, T)
-        for f in self.up_layers:
-            if self.use_causal_conv and isinstance(f, Conv2d):
-                c = f(c)[..., : c.size(-1)]
-            else:
-                c = f(c)
+        for idx, f in enumerate(self.up_layers):
+            # NOTE: We are *currently* not using causal_conv and this block is causing
+            #   problems, so we'll just comment this out for now.
+            # if self.use_causal_conv and isinstance(f, Conv2d):
+            #     c = f(c)[..., : c.size(-1)]
+            # else:
+            #     c = f(c)
+            c = f(c)
+
         return c.squeeze(1)  # (B, C, T')
 
 
