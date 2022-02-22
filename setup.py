@@ -56,6 +56,7 @@ entry_points = {
         "parallel-wavegan-normalize=parallel_wavegan.bin.normalize:main",
         "parallel-wavegan-train=parallel_wavegan.bin.train:main",
         "parallel-wavegan-decode=parallel_wavegan.bin.decode:main",
+        "parallel-wavegan-export=parallel_wavegan.bin.export:main",
     ]
 }
 
